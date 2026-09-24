@@ -1,7 +1,14 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { BRAILLE_MAP, textToBraille, brailleToText, dotsToUnicode } from '../utils/braille'
-import type { LearnMode } from '../types'
+import type { LearnMode, EncodeRecord, QuizRecord } from '../types'
+import {
+  loadQuizRecords,
+  loadEncodeRecords,
+  saveQuizRecords,
+  saveEncodeRecords,
+  uid,
+} from '../utils/records'
 
 export const useBrailleStore = defineStore('braille', () => {
   const inputText = ref('')
@@ -9,8 +16,15 @@ export const useBrailleStore = defineStore('braille', () => {
   const learnMode = ref<LearnMode>('charToBraille')
   const quizChar = ref('')
   const selectedDots = ref<number[]>([])
-  const score = ref({ correct: 0, total: 0 })
-  const history = ref<{ input: string; correct: boolean }[]>([])
+
+  // 带时间戳、本地持久化的答题与编码记录（时间从新到旧）
+  const quizRecords = ref<QuizRecord[]>(loadQuizRecords())
+  const encodeRecords = ref<EncodeRecord[]>(loadEncodeRecords())
+
+  const score = computed(() => ({
+    correct: quizRecords.value.filter(r => r.correct).length,
+    total: quizRecords.value.length,
+  }))
 
   const brailleUnicode = computed(() =>
     brailleOutput.value.map(d => dotsToUnicode(d)).join('')
@@ -18,6 +32,7 @@ export const useBrailleStore = defineStore('braille', () => {
 
   function translate() {
     brailleOutput.value = textToBraille(inputText.value)
+    scheduleEncodeRecord()
   }
 
   function reverseTranslate() {
@@ -39,16 +54,49 @@ export const useBrailleStore = defineStore('braille', () => {
 
   function checkQuizAnswer() {
     const correct = JSON.stringify([...selectedDots.value].sort()) === JSON.stringify([...(BRAILLE_MAP[quizChar.value] || [])].sort())
-    score.value.total++
-    if (correct) score.value.correct++
-    history.value.unshift({ input: quizChar.value, correct })
+    const record: QuizRecord = {
+      id: uid(),
+      char: quizChar.value,
+      dots: [...selectedDots.value],
+      correct,
+      at: Date.now(),
+    }
+    quizRecords.value.unshift(record)
+    saveQuizRecords(quizRecords.value)
     if (navigator.vibrate) navigator.vibrate(correct ? 100 : [100, 50, 100])
     generateQuiz()
   }
 
   function resetScore() {
-    score.value = { correct: 0, total: 0 }
-    history.value = []
+    quizRecords.value = []
+    saveQuizRecords(quizRecords.value)
+  }
+
+  // 编码结果在输入停顿后落一条记录；短时间内连续输入则合并到上一条
+  let encodeTimer: ReturnType<typeof setTimeout> | null = null
+  const ENCODE_DEBOUNCE_MS = 800
+  const ENCODE_MERGE_MS = 10_000
+
+  function scheduleEncodeRecord() {
+    if (encodeTimer) clearTimeout(encodeTimer)
+    encodeTimer = setTimeout(commitEncodeRecord, ENCODE_DEBOUNCE_MS)
+  }
+
+  function commitEncodeRecord() {
+    const text = inputText.value.trim()
+    if (!text) return
+    const now = Date.now()
+    const cells = textToBraille(text)
+    const last = encodeRecords.value[0]
+    // 同一轮连续输入（10 秒内）合并，避免每个字符都留档
+    if (last && now - last.at <= ENCODE_MERGE_MS) {
+      last.text = text
+      last.cells = cells
+      last.at = now
+    } else {
+      encodeRecords.value.unshift({ id: uid(), text, cells, at: now })
+    }
+    saveEncodeRecords(encodeRecords.value)
   }
 
   function exportPDF(): string {
@@ -62,7 +110,8 @@ export const useBrailleStore = defineStore('braille', () => {
   }
 
   return {
-    inputText, brailleOutput, learnMode, quizChar, selectedDots, score, history,
+    inputText, brailleOutput, learnMode, quizChar, selectedDots,
+    quizRecords, encodeRecords, score,
     brailleUnicode, translate, reverseTranslate, generateQuiz, toggleDot,
     checkQuizAnswer, resetScore, exportPDF
   }

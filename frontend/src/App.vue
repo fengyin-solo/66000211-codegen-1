@@ -24,6 +24,27 @@
           <BrailleCell v-for="(dots, i) in store.brailleOutput" :key="i" :dots="dots" :size="40" />
         </div>
       </div>
+
+      <!-- 编码结果记录：月份与档案列表、答题处口径一致 -->
+      <div class="col-span-2 bg-gray-900 rounded-xl p-4">
+        <div class="flex justify-between mb-2">
+          <h3 class="text-purple-300 font-bold">最近编码结果</h3>
+          <button @click="goArchive" class="text-xs text-purple-400 hover:underline">去归档/导出 →</button>
+        </div>
+        <p v-if="!store.encodeRecords.length" class="text-sm text-gray-500">
+          在上方输入文本并停顿片刻，编码结果会自动留存在这里。
+        </p>
+        <div v-else class="space-y-1 max-h-56 overflow-y-auto">
+          <div v-for="r in store.encodeRecords.slice(0, 20)" :key="r.id"
+            class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
+            <span class="text-teal-300 truncate">“{{ r.text }}”</span>
+            <span class="text-xs text-gray-400 shrink-0 ml-3">
+              <span class="bg-gray-700 rounded-full px-2 py-0.5 mr-2">{{ formatMonth(monthOf(r.at)) }}</span>
+              {{ formatDateTime(r.at) }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Learn -->
@@ -67,12 +88,17 @@
             <div class="text-xs text-gray-400">正确率</div>
           </div>
         </div>
-        <div class="space-y-1 max-h-48 overflow-y-auto">
-          <div v-for="(h, i) in store.history.slice(0, 20)" :key="i"
-            class="flex justify-between bg-gray-800 rounded p-2 text-sm"
-            :class="h.correct ? 'border-l-4 border-green-500' : 'border-l-4 border-red-500'">
-            <span>{{ h.input }}</span><span>{{ h.correct ? '✓' : '✗' }}</span>
+        <div class="space-y-1 max-h-72 overflow-y-auto">
+          <div v-for="r in store.quizRecords.slice(0, 20)" :key="r.id"
+            class="flex justify-between items-center bg-gray-800 rounded p-2 text-sm"
+            :class="r.correct ? 'border-l-4 border-green-500' : 'border-l-4 border-red-500'">
+            <span>{{ r.char }} {{ r.correct ? '✓' : '✗' }}</span>
+            <span class="text-xs text-gray-400">
+              <span class="bg-gray-700 rounded-full px-2 py-0.5 mr-2">{{ formatMonth(monthOf(r.at)) }}</span>
+              {{ formatDateTime(r.at) }}
+            </span>
           </div>
+          <p v-if="!store.quizRecords.length" class="text-sm text-gray-500">还没有答题记录。</p>
         </div>
       </div>
     </div>
@@ -89,6 +115,9 @@
       </div>
     </div>
 
+    <!-- Archive -->
+    <ArchivePanel v-if="activeTab === 'archive'" />
+
     <button @click="doExport" class="bg-green-700 px-4 py-2 rounded self-start hover:bg-green-600 text-sm">
       导出翻译文本
     </button>
@@ -99,7 +128,9 @@
 import { ref } from 'vue'
 import { useBrailleStore } from './store/braille'
 import { BRAILLE_MAP } from './utils/braille'
+import { formatMonth, formatDateTime, monthOf } from './utils/records'
 import BrailleCell from './components/BrailleCell.vue'
+import ArchivePanel from './components/ArchivePanel.vue'
 
 const store = useBrailleStore()
 const brailleMap = BRAILLE_MAP
@@ -107,8 +138,13 @@ const tabs = [
   { id: 'translate', label: '翻译模式' },
   { id: 'learn', label: '训练模式' },
   { id: 'ref', label: '速查表' },
+  { id: 'archive', label: '学习档案' },
 ]
 const activeTab = ref('translate')
+
+function goArchive() {
+  activeTab.value = 'archive'
+}
 
 function doExport() {
   const text = store.exportPDF()
